@@ -1,5 +1,5 @@
 /*
- Aaron's Robot V2.0
+ Aaron's Robot V2.1
  designed with love by Papa:  Jim Thomas Jan 2014
 
  select: Arduino Mega 2560 controller
@@ -18,10 +18,18 @@
 
  v2.0 upgrades
  single joystick drive for motors using 45 degree coordinate rotation algorithm
-
+ v2.1 upgrades
+ adding WTV020-SD-16P module to produce variety of sounds, R2D2 beeps, robot voices
+ parent hack thru TV remote control etc.
+ remove Alert Pin beeper
 
 
  Thanks and (C) to Manicbug for the NRF24L01 libraries
+ */
+/* WTV020-SD-16P audio module library
+ Created by Diego J. Arevalo, August 6th, 2012.
+ slight modifications to timing inside by Jim Thomas
+ Released into the public domain.
  */
 
 #include <SPI.h>
@@ -29,6 +37,8 @@
 #include "RF24.h"
 #include "printf.h"
 #include <Servo.h>
+
+#include <Wtv020sd16p.h>
 
 int joystick[3];
 
@@ -56,6 +66,18 @@ const int LRMask = 0x2;
 const int LDMask = 0x4;
 const int LUMask = 0x8;
 const int PushMask = 0x4040; // push either joystick
+
+// used for buttons that make a sound to indicate the button was already detected as pressed
+// B1,B2,B3,B4,R1,R2
+boolean B1Flag = false;
+boolean B2Flag = false;
+boolean B3Flag = false;
+boolean B4Flag = false;
+boolean R1Flag = false;
+boolean R2Flag = false;
+
+int soundPlay = 0;  // holds track number of last sound file played
+
 
 // structure to hold the payload 10bytes
 struct payload_r {
@@ -88,19 +110,19 @@ const int LmotorPower [7][7] = {
   { -255, -200, -200, -200, -150, 0, 150},
   { -255, -200, -150, -150, 0, 150, 200},
   { -255, -200, -150, 0, 150, 200, 255},
-  {-200, -150, 0, 150, 150, 200, 255},
-  {-100, 0, 100, 200, 200, 200, 255},
+  { -200, -150, 0, 150, 150, 200, 255},
+  { -100, 0, 100, 200, 200, 200, 255},
   {0, 150, 200, 255, 255, 255, 255}
 };
 const int RmotorPower [7][7] = {
-  {0, -150, -200 - 255, -255, -255, -255}, 
-  {150, 0, -150, -200, -200, -200, -255}, 
-  {200, 150, 0, -150, -150, -200, -255}, 
-  {255, 200, 150, 0, -150, -200, -255}, 
+  {0, -150, -200 - 255, -255, -255, -255},
+  {150, 0, -150, -200, -200, -200, -255},
+  {200, 150, 0, -150, -150, -200, -255},
+  {255, 200, 150, 0, -150, -200, -255},
   {255, 200, 150, 150, 0, -150, -200},
   {255, 200, 200, 200, 150, 0, -150},
   {255, 255, 255, 255, 200, 150, 0}
- 
+
 };
 
 // output pin definitions - to robot head
@@ -137,12 +159,29 @@ const int HandLED3 = 39;
 int LaserTone = 60; // variable tone for hand laser LEDs
 int count = 0;
 int lcount = 0;
-const int AlertPin = 26;
+
+// pins to control WTV020-SD-16P uSD Audio module in Wtv020sd16p
+const int resetPin = 26;
+const int clockPin = 27;
+const int dataPin = 30;
+const int busyPin = 31;
+
+
+/*
+Create an instance of the Wtv020sd16p class.
+ 1st parameter: Reset pin number.
+ 2nd parameter: Clock pin number.
+ 3rd parameter: Data pin number.
+ 4th parameter: Busy pin number.
+ */
+Wtv020sd16p wtv020sd16p(resetPin, clockPin, dataPin, busyPin);
 
 void setup(void)
 {
   Serial.begin(9600);
   printf_begin();
+  // initialize sound module
+  wtv020sd16p.reset();
   // motor pins as outputs, and motors off: set to 0V = LOW
   pinMode (RmotorPinF, OUTPUT);
   pinMode (RmotorPinR, OUTPUT);
@@ -169,7 +208,7 @@ void setup(void)
   pinMode (HandLED1, OUTPUT);
   pinMode (HandLED2, OUTPUT);
   pinMode (HandLED3, OUTPUT);
-  pinMode (AlertPin, OUTPUT);
+
 
   servo1.attach(SpotServo);
   servo2.attach(ArmServo);
@@ -184,6 +223,8 @@ void setup(void)
   radio.startListening();
   radio.printDetails();
 
+  // say Robie is awake
+  wtv020sd16p.playVoice(0000);
 }
 
 void loop(void)
@@ -205,7 +246,7 @@ void loop(void)
       //printf(" %4i %4i %4i %4i ",payload.j_RUD,payload.j_RLR,payload.j_LUD,payload.j_LLR);
       //printf("\n");
 
-      // right joystick controls motors,  -255 to 255 
+      // right joystick controls motors,  -255 to 255
       // note: j_RLR value comes in inversed
 
       // diagonal drive
@@ -230,13 +271,75 @@ void loop(void)
       else if (payload.j_RUD < 200) y = 5;
       else y = 6;
 
-      // lookup motor power values
+      // lookup motor power values from the motor power table
       joystick[0] = LmotorPower[y][x];
       joystick[1] = RmotorPower[y][x];
 
-      Serial.print(joystick[0]);
-      Serial.print(' ');
-      Serial.println(joystick[1]);
+     // Serial.print(joystick[0]);
+     // Serial.print(' ');
+     // Serial.println(joystick[1]);
+     
+     // play sounds from the sound card based on button pressed
+     // Machinery in B1 button
+     if (B1Mask & payload.sreg) {  // button pressed
+       if (B1Flag == false) { // just got pressed, play the song
+              // tracks of random machine sounds 
+              soundPlay = random(49, 59);
+              wtv020sd16p.stopVoice();
+              wtv020sd16p.asyncPlayVoice(soundPlay);
+              B1Flag = true; // set the flag showing button was pressed
+       }
+     } else {  // button is released reset the flag
+     B1Flag = false;
+     }
+     // R2D2 on B2 button
+     if (B2Mask & payload.sreg) {  // button pressed
+       if (B2Flag == false) { // just got pressed, play the song
+              // random R2D2 sounds 
+              int soundPlay = random(59, 75);
+              wtv020sd16p.stopVoice();
+              wtv020sd16p.asyncPlayVoice(soundPlay);
+              B2Flag = true; // set the flag showing button was pressed
+       }
+     } else {  // button is released reset the flag
+     B2Flag = false;
+     }
+     // drum solos on B3 button
+     if (B3Mask & payload.sreg) {  // button pressed
+       if (B3Flag == false) { // just got pressed, play the song
+              // random drum solos
+              int soundPlay = random(75, 80);
+              wtv020sd16p.stopVoice();
+              wtv020sd16p.asyncPlayVoice(soundPlay);
+              B3Flag = true; // set the flag showing button was pressed
+       }
+     } else {  // button is released reset the flag
+     B3Flag = false;
+     }
+     // random voices on B4 button
+     if (B4Mask & payload.sreg) {  // button pressed
+       if (B4Flag == false) { // just got pressed, play the song
+              // random voice recordings 
+              int soundPlay = random(1, 26);
+              wtv020sd16p.stopVoice();
+              wtv020sd16p.asyncPlayVoice(soundPlay);
+              B4Flag = true; // set the flag showing button was pressed
+       }
+     } else {  // button is released reset the flag
+     B4Flag = false;
+     }
+     // space guns and animal sounds on R2 button
+     if (R2Mask & payload.sreg) {  // button pressed
+       if (R2Flag == false) { // just got pressed, play the song
+              // space guns and animals
+              int soundPlay = random(33, 49);
+              wtv020sd16p.stopVoice();
+              wtv020sd16p.asyncPlayVoice(soundPlay);
+              R2Flag = true; // set the flag showing button was pressed
+       }
+     } else {  // button is released reset the flag
+     R2Flag = false;
+     }
 
       // LED Spot Light On / Off
       if (LUMask & payload.sreg) {
@@ -314,7 +417,11 @@ void loop(void)
         }
       }
 
-
+     // Serial.print(joystick[0]);
+     // Serial.print(' ');
+     // Serial.println(joystick[1]);
+     
+     
       // left (port) motor
       if (joystick[0] > 0) {      // forward
         analogWrite(LmotorPinF, joystick[0]);
@@ -354,7 +461,7 @@ void loop(void)
 
       // Hand LEDs
       if (R2Mask & payload.sreg) {
-        if (lcount == 3) {
+        if (lcount == 16) {
           count += 1;
           lcount = 0;
         } else {
@@ -363,11 +470,11 @@ void loop(void)
         if (count > 3) {
           count = 1;
         }
-        tone (SpeakerPin, LaserTone);
-        LaserTone += 150;
-        if (LaserTone > 2000) {
-          LaserTone = 60;
-        }
+        //  tone (SpeakerPin, LaserTone);
+        //  LaserTone += 150;
+        //  if (LaserTone > 2000) {
+        //   LaserTone = 60;
+        //}
         if (count == 1) {
           digitalWrite(HandLED1, LOW);
         }
@@ -387,18 +494,28 @@ void loop(void)
           digitalWrite(HandLED3, HIGH);
         }
         delay (2);
-        noTone (SpeakerPin);
+        //  noTone (SpeakerPin);
       }
       else {
         digitalWrite(HandLED1, LOW);
         digitalWrite(HandLED2, LOW);
         digitalWrite(HandLED3, LOW);
-        LaserTone = 60;
+        // LaserTone = 60;
       }
+      
+      // Play sound tracks from the sound card
+      
+      
+      
 
-      // sound output
+
+      /*
+      soundfile = random(79);
       if (LDMask & payload.sreg) {
-        tone (SpeakerPin, (payload.j_RLR + 300) * 5);
+        wtv020sd16p.stopVoice();
+        wtv020sd16p.asyncPlayVoice(soundfile);
+        Serial.print("Now playing sound file #: ");
+        Serial.println(soundfile);
       }
       else {
         if (B1Mask & payload.sreg) {
@@ -435,14 +552,9 @@ void loop(void)
         }
         noTone (SpeakerPin);
       }
-      //  parent annoyance feature :-)
-      if (RPushMask & payload.sreg) {
-        digitalWrite (AlertPin, HIGH);
-      }
-      else {
-        digitalWrite (AlertPin, LOW);
-      }
+      */
     }
+
 
 
   }
@@ -480,9 +592,8 @@ void AllStop () {
   digitalWrite(HandLED2, LOW);
   digitalWrite(HandLED3, LOW);
   // make a beep for loss of signal
-  //digitalWrite (AlertPin,HIGH);
   //delay (100);
-  digitalWrite (AlertPin, LOW);
+
 }
 
 
