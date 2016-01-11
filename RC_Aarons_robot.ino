@@ -1,29 +1,23 @@
 /*
  Aaron's Robot V2.1
  designed with love by Papa:  Jim Thomas Jan 2014
-
  select: Arduino Mega 2560 controller
  ---- NRF 24L01+ 2.4Ghz Radio Receiver-----
  works with RC transmitterr (RC_controller_NRF2401)
  This sketch receives joystick values and button codes
-
  ----Differential Drive Robot Chassis----
  L298N Dual H Bridge
  Right DC motor, Left DC  motor as viewed from the castor in rear
  received analog values drive two motors L and R on the robot
  The analog values received are already scaled to -255 to +255
-
   postive value drive the motor forward  power 0 to 255 max
  negative value drive the motor reverse power absvalue 0-255 max
-
  v2.0 upgrades
  single joystick drive for motors using 45 degree coordinate rotation algorithm
  v2.1 upgrades
  adding WTV020-SD-16P module to produce variety of sounds, R2D2 beeps, robot voices
  parent hack thru TV remote control etc.
  remove Alert Pin beeper
-
-
  Thanks and (C) to Manicbug for the NRF24L01 libraries
  */
 /* WTV020-SD-16P audio module library
@@ -595,26 +589,4 @@ void AllStop () {
   //delay (100);
 
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
